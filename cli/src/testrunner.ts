@@ -9,7 +9,11 @@ import { parse } from "path";
  * Load an assignment from the local folder.
  * Uses built in assignments when the local tests are missing.
  */
-async function loadAssignment(fs: FileSystem, file: Assignment) {
+async function loadAssignment(
+  fs: FileSystem,
+  file: Assignment,
+  compare = true,
+) {
   const assignment = Assignments[file.name as keyof typeof Assignments];
   const hdl = await fs.readFile(`${file.name}.hdl`);
   const tst = await fs
@@ -17,11 +21,14 @@ async function loadAssignment(fs: FileSystem, file: Assignment) {
     .catch(
       () => assignment[`${file.name}.tst` as keyof typeof assignment] as string,
     );
-  const cmp = await fs
-    .readFile(`${file.name}.cmp`)
-    .catch(
-      () => assignment[`${file.name}.cmp` as keyof typeof assignment] as string,
-    );
+  const cmp = compare
+    ? await fs
+        .readFile(`${file.name}.cmp`)
+        .catch(
+          () =>
+            assignment[`${file.name}.cmp` as keyof typeof assignment] as string,
+        )
+    : "";
 
   return { ...file, hdl, tst, cmp };
 }
@@ -29,13 +36,17 @@ async function loadAssignment(fs: FileSystem, file: Assignment) {
 /**
  * Run a nand2tetris.tst file.
  */
-export async function testRunner(dir: string, file: string) {
+export async function testRunner(dir: string, file: string, compare = true) {
   const fs = new FileSystem(new NodeFileSystemAdapter());
   fs.cd(dir);
-  const assignment = await loadAssignment(fs, parse(file));
+  const assignment = await loadAssignment(fs, parse(file), compare);
   const tryRun = runner(fs);
   const run = await tryRun(assignment);
-  console.log(run);
+  if (compare) {
+    console.log(run);
+  } else {
+    console.log(run.out);
+  }
 }
 
 // export async function testDebugger(root: string, name: string, port: number) {}

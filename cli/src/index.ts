@@ -59,6 +59,12 @@ yargs(hideBin(process.argv))
           type: "string",
           describe:
             "When set, look for the java IDE jars in this path and compare both runs.",
+        })
+        .option("cmp", {
+          type: "boolean",
+          default: true,
+          describe:
+            "Compare output against .cmp file (use --no-cmp to disable).",
         }),
     (argv) => {
       console.log("nand2tetris command run", argv);
@@ -67,7 +73,11 @@ yargs(hideBin(process.argv))
         case "":
         case ".tst":
           console.log("tst");
-          testRunner(dirname(resolve(argv.file ?? process.cwd())), name);
+          testRunner(
+            dirname(resolve(argv.file ?? process.cwd())),
+            name,
+            argv.cmp,
+          );
           break;
         case ".hdl":
           console.log("hdl");
