@@ -11,8 +11,28 @@ import { VM } from "@nand2tetris/simulator/languages/vm.js";
 import { VMTest } from "@nand2tetris/simulator/test/vmtst.js";
 import { Vm, type ParsedVmFile } from "@nand2tetris/simulator/vm/vm.js";
 import { dirname, join, parse, resolve } from "path";
+import type {
+  TstCommand,
+  TstFileOperation,
+} from "@nand2tetris/simulator/languages/tst.js";
 
 const VMSTEP_REGEX = /\bvmstep\b/i;
+
+function messageFrom(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object" && "err" in error) {
+    const err = (error as { err?: unknown }).err as
+      | { message?: string }
+      | undefined;
+    if (err?.message) return err.message;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
 
 interface VmSourceFile {
   name: string;
@@ -147,18 +167,30 @@ export async function testRunnerFromSource(
 }
 
 async function runVmTest(fs: FileSystem, tstPath: string, tstSource: string) {
-  const parsedTst = TST.parse(tstSource);
-  if (isErr(parsedTst)) {
-    throw Err(parsedTst);
-  }
+  try {
+    // If a VM test omits an explicit load command, prepend one so the script is valid.
+    let adjustedTst = tstSource;
+    const prelude: string[] = [];
+    const base = parse(tstPath).name;
+    if (!/^\s*load\s+/im.test(tstSource)) {
+      prelude.push(`load ${base}.vm,`);
+    }
+    if (!/^\s*compare-to\s+/im.test(tstSource)) {
+      prelude.push(`compare-to ${base}.cmp,`);
+    }
+    if (prelude.length) {
+      adjustedTst = `${prelude.join("\n")}\n${tstSource}`;
+    }
 
-  const testDir = dirname(tstPath);
-  let expectedCmp: string | undefined;
+    const parsedTstResult = TST.parse(adjustedTst);
+    if (isErr(parsedTstResult)) {
+      throw new Error(messageFrom(Err(parsedTstResult)));
+    }
+    const parsedTst = unwrap(parsedTstResult);
+    const testDir = dirname(tstPath);
+    let expectedCmp: string | undefined;
 
-  const maybeTest = VMTest.from(unwrap(parsedTst), {
-    dir: tstPath,
-    doEcho: (message) => console.log(message),
-    compareTo: async (file) => {
+    const loadCompareFile = async (file?: string) => {
       if (!file) {
         return;
       }
@@ -170,21 +202,54 @@ async function runVmTest(fs: FileSystem, tstPath: string, tstSource: string) {
           `Unable to read compare file ${cmpPath}: ${(error as Error).message}`,
         );
       }
-    },
-    doLoad: async (target) => {
-      const resolvedTarget = target ?? testDir;
-      const vm = await buildVmForTarget(fs, resolvedTarget);
-      vmTest.with(vm);
-    },
-  });
+    };
 
-  const vmTest = unwrap(maybeTest).using(fs);
-  await vmTest.run();
-  const out = vmTest.log();
-  const pass = expectedCmp ? out.trim() === expectedCmp.trim() : true;
-  console.log({ pass, out });
-  if (!pass) {
-    process.exitCode = 1;
+    const isCompareTo = (
+      command: TstCommand,
+    ): command is TstCommand & { op: TstFileOperation } =>
+      command.op.op === "compare-to";
+
+    const compareCommand = parsedTst.lines
+      .flatMap((line) =>
+        "statements" in line ? (line.statements as TstCommand[]) : [line],
+      )
+      .find(isCompareTo);
+
+    const compareFile = compareCommand?.op.file;
+    await loadCompareFile(compareFile);
+
+    const maybeTest = VMTest.from(parsedTst, {
+      dir: tstPath,
+      doEcho: (message) => console.log(message),
+      compareTo: loadCompareFile,
+      doLoad: async (target) => {
+        const resolvedTarget = target ?? testDir;
+        const vm = await buildVmForTarget(fs, resolvedTarget);
+        vmTest.with(vm);
+      },
+    });
+
+    const vmTest = unwrap(maybeTest).using(fs);
+    await vmTest.run();
+    const out = vmTest.log();
+    const pass = expectedCmp ? out.trim() === expectedCmp.trim() : false;
+
+    let errorMessage = "";
+    if (pass) {
+      process.stdout.write(out);
+      process.exit(0);
+    } else {
+      process.stdout.write(out);
+      errorMessage = expectedCmp
+        ? "Output did not match compare file."
+        : "No compare file found to validate output.";
+      process.stderr.write(errorMessage + "\n");
+      process.exit(1);
+    }
+  } catch (error) {
+    process.stderr.write(messageFrom(error) + "\n");
+    console.log("error");
+    process.exit(1);
   }
 }
 
