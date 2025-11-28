@@ -37,7 +37,6 @@ interface VmSourceFile {
   content: string;
 }
 
-
 /**
  * Load an assignment using a provided tst string instead of reading from disk.
  */
@@ -82,7 +81,7 @@ export async function testRunner(dir: string, file: string, tst: string) {
   const assignment = await loadAssignmentFromSource(
     fs,
     parse(tstPath),
-    adjustedTst
+    adjustedTst,
   );
   if (assignment.dir) {
     fs.cd(assignment.dir);
@@ -153,7 +152,7 @@ async function runVmTest(
   fs: FileSystem,
   tstPath: string,
   tst: string,
-  offset: number
+  offset: number,
 ) {
   try {
     const parsedTstResult = TST.parse(tst);

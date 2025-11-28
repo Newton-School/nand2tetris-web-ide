@@ -85,7 +85,7 @@ yargs(hideBin(process.argv))
             ? "No tst data was provided via stdin and no tst file was found."
             : "No tst file found.";
           throw new Error(
-            `${reason} Looked for ${parsedPath.name}.tst next to ${filePath}.`
+            `${reason} Looked for ${parsedPath.name}.tst next to ${filePath}.`,
           );
         }
       };
@@ -107,11 +107,7 @@ yargs(hideBin(process.argv))
           break;
         }
         case ".jack":
-          testRunner(
-            dirname(filePath),
-            parsedPath.name,
-            getTstSafely() ?? ""
-          );
+          testRunner(dirname(filePath), parsedPath.name, getTstSafely() ?? "");
           break;
         case ".hdl": {
           testRunnerFromSource(dirname(filePath), parsedPath.name, readStdin());
