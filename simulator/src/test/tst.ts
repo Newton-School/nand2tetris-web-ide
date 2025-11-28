@@ -1,7 +1,7 @@
 import { assertExists } from "@davidsouther/jiffies/lib/esm/assert.js";
 import { FileSystem } from "@davidsouther/jiffies/lib/esm/fs.js";
 import { Output } from "../output.js";
-import { Action } from "../types.js";
+import { Action, AsyncAction } from "../types.js";
 import {
   OutputParams,
   TestBreakInstruction,
@@ -27,7 +27,9 @@ export abstract class Test<IS extends TestInstruction = TestInstruction> {
     doCompareTo?: (arg: string) => Promise<void>
   ) {
     this.doEcho = doEcho;
-    this.doCompareTo = doCompareTo;
+    if (doCompareTo) {
+      this.doCompareTo = async (arg) => doCompareTo(arg);
+    }
     this.dir = path;
   }
 
