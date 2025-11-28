@@ -64,14 +64,57 @@ yargs(hideBin(process.argv))
       const filePath = resolve(argv.file ?? process.cwd());
       const parsedPath = parse(filePath);
       const ext = parsedPath.ext || ".tst";
+      const hasPipedInput = !process.stdin.isTTY;
+      const readStdin = () => fsCore.readFileSync(0, "utf8");
+      const readTstFile = () => {
+        const tstPath = path.join(dirname(filePath), `${parsedPath.name}.tst`);
+        return fsCore.readFileSync(tstPath, "utf8");
+      };
+
+      const loadTstInput = () => {
+        if (hasPipedInput) {
+          const piped = readStdin();
+          if (piped.trim().length) {
+            return piped;
+          }
+        }
+        try {
+          return readTstFile();
+        } catch (error) {
+          const reason = hasPipedInput
+            ? "No tst data was provided via stdin and no tst file was found."
+            : "No tst file found.";
+          throw new Error(
+            `${reason} Looked for ${parsedPath.name}.tst next to ${filePath}.`
+          );
+        }
+      };
+
+      const getTstSafely = () => {
+        try {
+          return loadTstInput();
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          console.error(message);
+          process.exit(1);
+        }
+      };
+
       switch (ext) {
-        case ".tst":
-          console.log("tst");
-          testRunner(filePath);
+        case ".tst": {
+          testRunner(dirname(filePath), parsedPath.name, getTstSafely() ?? "");
+          break;
+        }
+        case ".jack":
+          testRunner(
+            dirname(filePath),
+            parsedPath.name,
+            getTstSafely() ?? ""
+          );
           break;
         case ".hdl": {
-          const tst = fsCore.readFileSync(0, "utf8");
-          testRunnerFromSource(dirname(filePath), parsedPath.name, tst);
+          testRunnerFromSource(dirname(filePath), parsedPath.name, readStdin());
           break;
         }
         default:
