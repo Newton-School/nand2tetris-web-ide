@@ -1,5 +1,8 @@
-// Minimal VM test for the SimpleJack.addPair function
-// Assumes SimpleJack.vm is present in the same folder.
+// Minimal VM test for the addPair function in this folder.
+// Uses the compiled Main.vm and expected output Main.cmp.
+
+load Main.vm,
+compare-to Main.cmp,
 
 set sp 256,
 set local 300,

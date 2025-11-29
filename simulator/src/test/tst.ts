@@ -1,7 +1,7 @@
 import { assertExists } from "@davidsouther/jiffies/lib/esm/assert.js";
 import { FileSystem } from "@davidsouther/jiffies/lib/esm/fs.js";
 import { Output } from "../output.js";
-import { Action, AsyncAction } from "../types.js";
+import { Action } from "../types.js";
 import {
   OutputParams,
   TestBreakInstruction,
@@ -17,14 +17,14 @@ export abstract class Test<IS extends TestInstruction = TestInstruction> {
   protected _log = "";
   fs: FileSystem = new FileSystem();
   protected doEcho?: Action<string>;
-  protected doCompareTo?: AsyncAction<string>;
+  protected doCompareTo?: (arg: string) => void | Promise<void>;
   protected dir?: string;
   protected outputFileName?: string;
 
   constructor(
     path?: string,
     doEcho?: Action<string>,
-    doCompareTo?: Action<string> | AsyncAction<string>,
+    doCompareTo?: (arg: string) => void | Promise<void>,
   ) {
     this.doEcho = doEcho;
     if (doCompareTo) {

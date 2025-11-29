@@ -2,9 +2,7 @@ import { FileSystem } from "@davidsouther/jiffies/lib/esm/fs.js";
 import { NodeFileSystemAdapter } from "@davidsouther/jiffies/lib/esm/fs_node.js";
 import { Err, isErr, unwrap } from "@davidsouther/jiffies/lib/esm/result.js";
 import type { Assignment } from "@nand2tetris/projects/base.js";
-import { Assignments } from "@nand2tetris/projects/full.js";
 import { compile } from "@nand2tetris/simulator/jack/compiler.js";
-import type { AssignmentFiles } from "@nand2tetris/simulator/projects/runner.js";
 import { runner } from "@nand2tetris/simulator/projects/runner.js";
 import { TST } from "@nand2tetris/simulator/languages/tst.js";
 import { VM } from "@nand2tetris/simulator/languages/vm.js";
@@ -40,33 +38,6 @@ interface VmSourceFile {
 }
 
 /**
- * Load an assignment from the local folder.
- * Uses built in assignments when the local tests are missing.
- */
-async function loadAssignment(
-  fs: FileSystem,
-  file: Assignment,
-): Promise<AssignmentFiles> {
-  const baseDir = file.dir || process.cwd();
-  const assignment = Assignments[file.name as keyof typeof Assignments];
-  const hdlPath = join(baseDir, `${file.name}.hdl`);
-  const tstPath = join(baseDir, `${file.name}.tst`);
-  const cmpPath = join(baseDir, `${file.name}.cmp`);
-
-  const hdl = await fs.readFile(hdlPath);
-  const tst =
-    (await fs.readFile(tstPath).catch(() => undefined)) ??
-    ((assignment?.[`${file.name}.tst` as keyof typeof assignment] ??
-      "") as string);
-  const cmp =
-    (await fs.readFile(cmpPath).catch(() => undefined)) ??
-    ((assignment?.[`${file.name}.cmp` as keyof typeof assignment] ??
-      "") as string);
-
-  return { ...file, hdl, tst, cmp };
-}
-
-/**
  * Load an assignment using a provided tst string instead of reading from disk.
  */
 async function loadAssignmentFromSource(
@@ -85,22 +56,33 @@ async function loadAssignmentFromSource(
 /**
  * Run a nand2tetris.tst file.
  */
-export async function testRunner(testFilePath: string) {
+export async function testRunner(dir: string, file: string, tst: string) {
   const fs = new FileSystem(new NodeFileSystemAdapter());
-  const absolutePath = resolve(testFilePath);
-  const parsedTarget = parse(absolutePath);
-  const tstPath =
-    parsedTarget.ext.toLowerCase() === ".tst"
-      ? absolutePath
-      : `${absolutePath}.tst`;
-  const tstSource = await fs.readFile(tstPath);
+  const tstPath = resolve(join(dir, `${file}.tst`));
 
-  if (VMSTEP_REGEX.test(tstSource)) {
-    await runVmTest(fs, tstPath, tstSource);
+  // If a VM test omits the standard boilerplate, prepend it so the script is valid.
+  const base = parse(tstPath).name;
+  const prelude: string[] = [];
+  if (!/^\s*load\s+/im.test(tst)) {
+    prelude.push(`load ${base}.vm,`);
+  }
+  if (!/^\s*compare-to\s+/im.test(tst)) {
+    prelude.push(`compare-to ${base}.cmp,`);
+  }
+  const adjustedTst = prelude.length ? `${prelude.join("\n")}\n${tst}` : tst;
+  const offset = prelude.length;
+
+  if (VMSTEP_REGEX.test(adjustedTst)) {
+    await runVmTest(fs, tstPath, adjustedTst, offset);
     return;
   }
 
-  const assignment = await loadAssignment(fs, parse(tstPath));
+  // Fallback to the HDL runner if this isn't a VM test.
+  const assignment = await loadAssignmentFromSource(
+    fs,
+    parse(tstPath),
+    adjustedTst,
+  );
   if (assignment.dir) {
     fs.cd(assignment.dir);
   }
@@ -166,25 +148,16 @@ export async function testRunnerFromSource(
   process.exit(!errorMessage ? 0 : 1);
 }
 
-async function runVmTest(fs: FileSystem, tstPath: string, tstSource: string) {
+async function runVmTest(
+  fs: FileSystem,
+  tstPath: string,
+  tst: string,
+  offset: number,
+) {
   try {
-    // If a VM test omits an explicit load command, prepend one so the script is valid.
-    let adjustedTst = tstSource;
-    const prelude: string[] = [];
-    const base = parse(tstPath).name;
-    if (!/^\s*load\s+/im.test(tstSource)) {
-      prelude.push(`load ${base}.vm,`);
-    }
-    if (!/^\s*compare-to\s+/im.test(tstSource)) {
-      prelude.push(`compare-to ${base}.cmp,`);
-    }
-    if (prelude.length) {
-      adjustedTst = `${prelude.join("\n")}\n${tstSource}`;
-    }
-
-    const parsedTstResult = TST.parse(adjustedTst);
+    const parsedTstResult = TST.parse(tst);
     if (isErr(parsedTstResult)) {
-      throw new Error(messageFrom(Err(parsedTstResult)));
+      throw Err(parsedTstResult);
     }
     const parsedTst = unwrap(parsedTstResult);
     const testDir = dirname(tstPath);
@@ -247,8 +220,14 @@ async function runVmTest(fs: FileSystem, tstPath: string, tstSource: string) {
       process.exit(1);
     }
   } catch (error) {
-    process.stderr.write(messageFrom(error) + "\n");
-    console.log("error");
+    let errorMessage = messageFrom(error);
+    if (offset) {
+      errorMessage = errorMessage.replace(/Line\s+(\d+)/gi, (_, l) => {
+        const line = Number(l) - offset;
+        return `Line ${line}`;
+      });
+    }
+    process.stderr.write(errorMessage + "\n");
     process.exit(1);
   }
 }
