@@ -196,7 +196,7 @@ async function runVmTest(
         await fs.readFile(cmpPath);
       } catch (error) {
         throw new Error(
-          `Unable to read compare file ${cmpPath}: ${(error as Error).message}`
+          `Unable to read compare file ${cmpPath}: ${(error as Error).message}`,
         );
       }
     };
@@ -226,7 +226,7 @@ async function runVmTest(
         process.stdout.write(out);
         process.exit(1);
       }
-    }else{ 
+    } else {
       process.stdout.write(out);
       process.exit(0);
     }
