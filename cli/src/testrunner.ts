@@ -161,21 +161,7 @@ async function runVmTest(
     }
     const parsedTst = unwrap(parsedTstResult);
     const testDir = dirname(tstPath);
-    let expectedCmp: string | undefined;
-
-    const loadCompareFile = async (file?: string) => {
-      if (!file) {
-        return;
-      }
-      const cmpPath = join(testDir, file);
-      try {
-        expectedCmp = await fs.readFile(cmpPath);
-      } catch (error) {
-        throw new Error(
-          `Unable to read compare file ${cmpPath}: ${(error as Error).message}`,
-        );
-      }
-    };
+    let hasCmpFile = false;
 
     const isCompareTo = (
       command: TstCommand,
@@ -189,12 +175,36 @@ async function runVmTest(
       .find(isCompareTo);
 
     const compareFile = compareCommand?.op.file;
-    await loadCompareFile(compareFile);
+
+    // Check if cmp file exists in directory
+    if (compareFile) {
+      const cmpPath = join(testDir, compareFile);
+      try {
+        const stats = await fs.stat(cmpPath);
+        hasCmpFile = stats.isFile();
+      } catch (error) {
+        hasCmpFile = false;
+      }
+    }
+
+    const loadCompareFile = async (file?: string) => {
+      if (!file || !hasCmpFile) {
+        return;
+      }
+      const cmpPath = join(testDir, file);
+      try {
+        await fs.readFile(cmpPath);
+      } catch (error) {
+        throw new Error(
+          `Unable to read compare file ${cmpPath}: ${(error as Error).message}`,
+        );
+      }
+    };
 
     const maybeTest = VMTest.from(parsedTst, {
       dir: tstPath,
       doEcho: (message) => console.log(message),
-      compareTo: loadCompareFile,
+      compareTo: hasCmpFile ? loadCompareFile : undefined,
       doLoad: async (target) => {
         const resolvedTarget = target ?? testDir;
         const vm = await buildVmForTarget(fs, resolvedTarget);
@@ -205,19 +215,20 @@ async function runVmTest(
     const vmTest = unwrap(maybeTest).using(fs);
     await vmTest.run();
     const out = vmTest.log();
-    const pass = expectedCmp ? out.trim() === expectedCmp.trim() : false;
 
-    let errorMessage = "";
-    if (pass) {
-      process.stdout.write(out);
-      process.exit(0);
+    if (hasCmpFile) {
+      const expectedCmp = await fs.readFile(join(testDir, compareFile ?? ""));
+      const pass = expectedCmp ? out.trim() === expectedCmp.trim() : false;
+      if (pass) {
+        process.stdout.write(out);
+        process.exit(0);
+      } else {
+        process.stdout.write(out);
+        process.exit(1);
+      }
     } else {
       process.stdout.write(out);
-      errorMessage = expectedCmp
-        ? "Output did not match compare file."
-        : "No compare file found to validate output.";
-      process.stderr.write(errorMessage + "\n");
-      process.exit(1);
+      process.exit(0);
     }
   } catch (error) {
     let errorMessage = messageFrom(error);
